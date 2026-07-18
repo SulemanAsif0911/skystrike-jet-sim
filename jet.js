@@ -334,5 +334,14 @@ export class Jet {
   }
   toggleCamera(){ this.cameraMode = this.cameraMode==='third' ? 'first' : 'third'; this._camInit=false; }
 
+  // Debug helper: flips only the visual mesh 180° around its own vertical axis, without touching
+  // flight physics/orientation — lets you confirm the correct flip180 value live before editing core.js.
+  debugFlipNose(){
+    const inner = this.object.children[0];
+    inner.rotateY(Math.PI);
+    this._noseFlipped = !this._noseFlipped;
+    return this._noseFlipped;
+  }
+
   distanceTo(pointVec3){ return this.position.distanceTo(pointVec3); }
 }
