@@ -205,10 +205,10 @@ function startRace(){
     participants.push({ jet, isHuman:true, playerIndex:i, bot:null });
   }
 
-  // F35's source mesh is far higher-poly than the other two jets and can't be simplified further
-  // without visible damage, so bots favor the lighter F16/F14 models to keep multi-bot and
-  // split-screen framerates healthy; F35 still appears, just less often.
-  const botJetCycle = ['f16','f14','f16','f35','f14','f16'];
+  // Equal rotation across all three jets so every model actually shows up in play.
+  // (F35's source mesh is heavier than the other two - if you add many bots and notice
+  // slowdown, you can bias this back toward f16/f14, e.g. ['f16','f14','f16','f35','f14','f16'].)
+  const botJetCycle = ['f16','f35','f14'];
   for (let i=0;i<config.botCount;i++){
     const def = JET_DEFS.find(d=>d.id===botJetCycle[i % botJetCycle.length]) || JET_DEFS[0];
     const tmpl = jetTemplates[def.id];
