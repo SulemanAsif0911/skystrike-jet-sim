@@ -10,9 +10,9 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 // flip180: manual safety-net — flip to true for a given jet if it ever appears to fly nose-backwards
 // (auto-orientation detects the nose from geometry, but you can override it here in one line).
 const JET_DEFS = [
-  { id:'f16', name:'F-16C Block 50', file:'models/f16.glb', desc:'Agile multirole fighter', maxSpeed:210, accel:0.9, turnRate:2.6, flip180:true },
-  { id:'f35', name:'F-35 Lightning II', file:'models/f35.glb', desc:'Stealth strike fighter', maxSpeed:195, accel:0.8, turnRate:2.3, flip180:true },
-  { id:'f14', name:'F-14 Tomcat', file:'models/f14.glb', desc:'Heavy swing-wing interceptor', maxSpeed:225, accel:0.7, turnRate:2.0, flip180:true },
+  { id:'f16', name:'F-16C Block 50', file:'models/f16.glb', desc:'Agile multirole fighter', maxSpeed:210, accel:0.9, turnRate:2.6, flip180: true },
+  { id:'f35', name:'F-35 Lightning II', file:'models/f35.glb', desc:'Stealth strike fighter', maxSpeed:195, accel:0.8, turnRate:2.3, flip180: true },
+  { id:'f14', name:'F-14 Tomcat', file:'models/f14.glb', desc:'Heavy swing-wing interceptor', maxSpeed:225, accel:0.7, turnRate:2.0, flip180: true },
 ];
 const TARGET_JET_LENGTH = 18;         // normalized in-game length (meters-ish) of every jet model
 const SEA_LEVEL = 0;
