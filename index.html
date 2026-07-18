@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SKYSTRIKE — Fighter Jet Simulator</title>
+<style>
+:root{
+  --amber:#ffb020; --orange:#ff7a1a; --cyan:#28f0ff; --bg:#05070a; --cream:#f3e6cf;
+  --panel:rgba(8,14,20,0.86); --panel-border:rgba(40,240,255,0.25);
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{width:100%; height:100%; overflow:hidden; background:#000; font-family:'Segoe UI',system-ui,-apple-system,sans-serif; color:var(--cream);}
+#app{position:fixed; inset:0;}
+canvas#gl{position:absolute; inset:0; display:block; outline:none;}
+
+/* ---------- shared UI bits ---------- */
+.hidden{display:none !important;}
+.btn{
+  font-family:inherit; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  background:linear-gradient(180deg, rgba(255,176,32,.16), rgba(255,122,26,.10));
+  border:1px solid var(--amber); color:var(--amber); padding:12px 22px; border-radius:6px;
+  cursor:pointer; font-size:14px; transition:all .15s ease; position:relative; overflow:hidden;
+}
+.btn:hover{background:linear-gradient(180deg, rgba(255,176,32,.32), rgba(255,122,26,.2)); box-shadow:0 0 18px rgba(255,176,32,.45); transform:translateY(-1px);}
+.btn:active{transform:translateY(0px) scale(.98);}
+.btn.primary{background:linear-gradient(180deg, rgba(40,240,255,.22), rgba(40,240,255,.08)); border-color:var(--cyan); color:var(--cyan);}
+.btn.primary:hover{box-shadow:0 0 22px rgba(40,240,255,.55);}
+.btn.ghost{background:transparent; border-color:rgba(243,230,207,.35); color:var(--cream);}
+.btn:disabled{opacity:.35; cursor:not-allowed; filter:grayscale(1);}
+.panel{
+  background:var(--panel); border:1px solid var(--panel-border); border-radius:10px;
+  box-shadow:0 0 40px rgba(0,0,0,.55), inset 0 0 60px rgba(40,240,255,.03);
+  backdrop-filter:blur(6px);
+}
+.scanline-title{
+  font-weight:900; letter-spacing:.12em; text-transform:uppercase;
+  background:linear-gradient(90deg, var(--amber), var(--cyan));
+  -webkit-background-clip:text; background-clip:text; color:transparent;
+  text-shadow:0 0 30px rgba(255,176,32,.25);
+}
+
+/* ---------- overlay screens ---------- */
+.screen{
+  position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+  background:radial-gradient(ellipse at 50% 20%, rgba(20,40,55,.55), rgba(2,4,7,.92) 70%);
+  z-index:50; padding:20px;
+}
+.screen-inner{width:min(920px, 94vw); max-height:92vh; overflow-y:auto; padding:34px 38px;}
+.screen-inner::-webkit-scrollbar{width:8px;}
+.screen-inner::-webkit-scrollbar-thumb{background:rgba(40,240,255,.3); border-radius:4px;}
+
+#main-menu h1{font-size:clamp(34px,6vw,58px); text-align:center; margin-bottom:4px;}
+#main-menu .subtitle{text-align:center; color:rgba(243,230,207,.55); letter-spacing:.2em; font-size:12px; text-transform:uppercase; margin-bottom:30px;}
+.mode-grid{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:22px;}
+.mode-card{
+  padding:22px 18px; border:1px solid rgba(255,176,32,.25); border-radius:10px; cursor:pointer;
+  background:rgba(255,176,32,.04); transition:.15s; text-align:center;
+}
+.mode-card:hover{background:rgba(255,176,32,.1); border-color:var(--amber); transform:translateY(-2px);}
+.mode-card.selected{background:rgba(40,240,255,.1); border-color:var(--cyan); box-shadow:0 0 20px rgba(40,240,255,.25);}
+.mode-card .icon{font-size:34px; margin-bottom:8px;}
+.mode-card h3{font-size:15px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6px; color:var(--cream);}
+.mode-card p{font-size:12px; color:rgba(243,230,207,.55); line-height:1.4;}
+.menu-actions{display:flex; justify-content:center; gap:14px; margin-top:8px;}
+.credit-line{text-align:center; margin-top:18px; font-size:11px; color:rgba(243,230,207,.3); letter-spacing:.08em;}
+
+/* setup screen */
+.setup-section{margin-bottom:22px;}
+.setup-section > label.head{
+  display:block; font-size:11px; letter-spacing:.15em; text-transform:uppercase; color:var(--cyan);
+  margin-bottom:10px; border-bottom:1px solid rgba(40,240,255,.2); padding-bottom:6px;
+}
+.jet-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:12px;}
+.jet-card{
+  border:1px solid rgba(243,230,207,.2); border-radius:8px; padding:14px 10px; text-align:center; cursor:pointer;
+  background:rgba(255,255,255,.02); transition:.15s;
+}
+.jet-card:hover{border-color:var(--amber);}
+.jet-card.selected{border-color:var(--cyan); background:rgba(40,240,255,.08); box-shadow:0 0 14px rgba(40,240,255,.3);}
+.jet-card .jetname{font-weight:700; font-size:13px; margin-top:6px;}
+.jet-card .jetdesc{font-size:10px; color:rgba(243,230,207,.5); margin-top:3px;}
+.jet-silhouette{font-size:30px;}
+.player-block{border:1px solid rgba(255,176,32,.18); border-radius:8px; padding:14px; margin-bottom:12px;}
+.player-block .ptitle{font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--amber); margin-bottom:10px;}
+
+.row-flex{display:flex; align-items:center; gap:14px; flex-wrap:wrap;}
+.slider-row{display:flex; align-items:center; gap:14px; margin-bottom:12px;}
+.slider-row label{flex:0 0 190px; font-size:13px; color:var(--cream);}
+.slider-row input[type=range]{flex:1; accent-color:var(--cyan);}
+.slider-row .val{width:38px; text-align:right; font-weight:700; color:var(--cyan); font-size:14px;}
+.seg{display:flex; gap:8px; flex:1;}
+.seg button{
+  flex:1; padding:8px 6px; font-size:12px; border-radius:5px; border:1px solid rgba(243,230,207,.25);
+  background:rgba(255,255,255,.03); color:rgba(243,230,207,.7); cursor:pointer; letter-spacing:.05em; text-transform:uppercase;
+}
+.seg button.on{border-color:var(--amber); color:var(--amber); background:rgba(255,176,32,.14); box-shadow:0 0 10px rgba(255,176,32,.25);}
+.toggle-row{display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;}
+.switch{width:46px; height:24px; border-radius:12px; background:rgba(243,230,207,.15); position:relative; cursor:pointer; border:1px solid rgba(243,230,207,.25); flex-shrink:0;}
+.switch .knob{position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:rgba(243,230,207,.6); transition:.15s;}
+.switch.on{background:rgba(40,240,255,.25); border-color:var(--cyan);}
+.switch.on .knob{left:24px; background:var(--cyan); box-shadow:0 0 8px var(--cyan);}
+.controls-hint{font-size:11px; color:rgba(243,230,207,.45); line-height:1.7; background:rgba(255,255,255,.02); border-radius:6px; padding:10px 12px; margin-top:6px;}
+.controls-hint b{color:var(--cream);}
+
+/* ---------- loading ---------- */
+#loading-screen{z-index:100; flex-direction:column; gap:18px;}
+#loading-screen .jetline{font-size:13px; letter-spacing:.3em; text-transform:uppercase; color:rgba(243,230,207,.5);}
+.loadbar-wrap{width:min(460px,80vw); height:10px; border:1px solid var(--panel-border); border-radius:6px; overflow:hidden; background:rgba(255,255,255,.03);}
+.loadbar-fill{height:100%; width:0%; background:linear-gradient(90deg,var(--amber),var(--cyan)); transition:width .2s ease; box-shadow:0 0 12px var(--cyan);}
+#loading-screen .pct{font-size:12px; color:var(--cyan); letter-spacing:.1em;}
+
+/* ---------- HUD ---------- */
+#hud-layer{position:absolute; inset:0; z-index:20; pointer-events:none;}
+.viewport-hud{position:absolute; pointer-events:none;}
+.vh-top-left{position:absolute; top:14px; left:16px; font-size:12px;}
+.vh-label{
+  font-size:11px; letter-spacing:.15em; text-transform:uppercase; color:var(--amber);
+  background:rgba(5,7,10,.55); padding:3px 10px; border:1px solid rgba(255,176,32,.35); border-radius:4px; display:inline-block; margin-bottom:6px;
+}
+.gauge-cluster{display:flex; gap:8px;}
+.gauge{
+  background:rgba(5,10,14,.6); border:1px solid rgba(40,240,255,.3); border-radius:6px; padding:6px 12px; min-width:78px;
+}
+.gauge .g-label{font-size:9px; letter-spacing:.12em; color:rgba(40,240,255,.75); text-transform:uppercase;}
+.gauge .g-val{font-size:19px; font-weight:800; color:var(--cream); font-variant-numeric:tabular-nums;}
+.gauge .g-unit{font-size:9px; color:rgba(243,230,207,.4);}
+.throttle-bar-wrap{width:78px; height:6px; background:rgba(255,255,255,.08); border-radius:3px; margin-top:4px; overflow:hidden;}
+.throttle-bar-fill{height:100%; background:linear-gradient(90deg,var(--amber),var(--orange)); width:0%;}
+
+.vh-top-right{position:absolute; top:14px; right:16px; text-align:right;}
+.checkpoint-counter{
+  background:rgba(5,10,14,.6); border:1px solid rgba(255,176,32,.35); border-radius:6px; padding:8px 14px;
+}
+.checkpoint-counter .cc-label{font-size:9px; letter-spacing:.12em; color:rgba(255,176,32,.8); text-transform:uppercase;}
+.checkpoint-counter .cc-val{font-size:22px; font-weight:900; color:var(--amber);}
+.race-timer{margin-top:8px; font-size:14px; color:var(--cyan); font-variant-numeric:tabular-nums; background:rgba(5,10,14,.5); padding:4px 10px; border-radius:5px; border:1px solid rgba(40,240,255,.25);}
+
+.altimeter-wrap{position:absolute; right:16px; top:50%; transform:translateY(-50%); display:flex; flex-direction:column; align-items:center;}
+.altimeter{
+  width:34px; height:180px; border:1px solid rgba(40,240,255,.3); border-radius:6px; background:rgba(5,10,14,.55);
+  position:relative; overflow:hidden;
+}
+.alt-fill{position:absolute; bottom:0; left:0; width:100%; background:linear-gradient(0deg, var(--cyan), rgba(40,240,255,.15)); transition:height .1s linear;}
+.alt-marker{position:absolute; left:0; width:100%; height:2px; background:var(--amber);}
+.alt-text{font-size:10px; margin-top:4px; color:rgba(40,240,255,.85); letter-spacing:.08em;}
+
+/* compass */
+.compass-wrap{position:absolute; bottom:18px; left:50%; transform:translateX(-50%); display:flex; flex-direction:column; align-items:center; gap:4px;}
+.compass-ring{
+  width:150px; height:150px; border-radius:50%; position:relative; background:radial-gradient(circle at 50% 40%, rgba(10,18,24,.75), rgba(4,7,10,.9));
+  border:2px solid rgba(40,240,255,.4); box-shadow:0 0 22px rgba(40,240,255,.2), inset 0 0 20px rgba(0,0,0,.6);
+}
+.compass-dial{position:absolute; inset:0; transition:transform .05s linear;}
+.compass-tick{position:absolute; left:50%; top:4px; width:1px; height:9px; background:rgba(243,230,207,.35); transform-origin:50% 71px;}
+.compass-cardinal{position:absolute; left:50%; top:10px; font-size:11px; font-weight:800; color:rgba(243,230,207,.6); transform-origin:50% 65px; transform:translateX(-50%);}
+.compass-cardinal.N{color:var(--amber);}
+.compass-needle{
+  position:absolute; left:50%; top:50%; width:0; height:0; transform-origin:0 0;
+  border-left:8px solid transparent; border-right:8px solid transparent; border-bottom:52px solid var(--cyan);
+  margin-left:-8px; margin-top:-52px; filter:drop-shadow(0 0 6px var(--cyan)); transition:transform .08s linear;
+}
+.compass-center-dot{position:absolute; left:50%; top:50%; width:8px; height:8px; margin:-4px; border-radius:50%; background:var(--cream); box-shadow:0 0 8px var(--cream); z-index:3;}
+.compass-readout{display:flex; gap:10px; font-size:11px; color:rgba(243,230,207,.7); background:rgba(5,10,14,.55); padding:3px 12px; border-radius:5px; border:1px solid rgba(40,240,255,.2);}
+.compass-readout b{color:var(--cyan);}
+.pitch-indicator{position:absolute; left:50%; top:50%; width:64px; margin-left:-32px; margin-top:-1px; height:2px; background:rgba(40,240,255,.5);}
+
+.crosshair{position:absolute; left:50%; top:44%; transform:translate(-50%,-50%); width:26px; height:26px; opacity:.55;}
+.crosshair::before,.crosshair::after{content:''; position:absolute; background:var(--cyan);}
+.crosshair::before{left:50%; top:0; width:1.5px; height:100%; margin-left:-.75px;}
+.crosshair::after{top:50%; left:0; height:1.5px; width:100%; margin-top:-.75px;}
+
+.speedlines{position:absolute; inset:0; pointer-events:none; opacity:0; transition:opacity .2s;}
+
+.message-banner{
+  position:absolute; top:26%; left:50%; transform:translate(-50%,-50%); text-align:center; pointer-events:none;
+  font-weight:900; letter-spacing:.1em; text-transform:uppercase; opacity:0; transition:opacity .25s, transform .25s;
+}
+.message-banner.show{opacity:1;}
+.message-banner .big{font-size:clamp(20px,3.4vw,36px); color:var(--amber); text-shadow:0 0 22px rgba(255,176,32,.6);}
+.message-banner .small{font-size:13px; color:var(--cyan); margin-top:4px; letter-spacing:.2em;}
+
+.boost-bar-wrap{position:absolute; bottom:18px; right:16px; width:110px;}
+.boost-label{font-size:9px; letter-spacing:.12em; color:rgba(255,122,26,.85); text-transform:uppercase; margin-bottom:3px;}
+.boost-bar{height:8px; border-radius:4px; background:rgba(255,255,255,.08); overflow:hidden; border:1px solid rgba(255,122,26,.3);}
+.boost-fill{height:100%; width:100%; background:linear-gradient(90deg,var(--orange),var(--amber));}
+
+.mini-help{position:absolute; bottom:18px; left:16px; font-size:10px; color:rgba(243,230,207,.4); line-height:1.6; max-width:200px;}
+
+/* split divider */
+#split-divider{position:absolute; z-index:25; background:linear-gradient(90deg, transparent, var(--cyan), transparent); box-shadow:0 0 14px var(--cyan);}
+
+/* pause / results */
+#pause-screen .screen-inner, #results-screen .screen-inner{text-align:center;}
+.result-list{margin:18px 0; text-align:left;}
+.result-row{display:flex; align-items:center; gap:12px; padding:10px 14px; border-radius:6px; background:rgba(255,255,255,.03); margin-bottom:8px; border:1px solid rgba(243,230,207,.1);}
+.result-row .place{font-size:20px; font-weight:900; width:34px; color:var(--amber);}
+.result-row.win{border-color:var(--cyan); background:rgba(40,240,255,.08); box-shadow:0 0 16px rgba(40,240,255,.2);}
+.result-row .name{flex:1; font-weight:700;}
+.result-row .time{color:var(--cyan); font-variant-numeric:tabular-nums;}
+
+@media (max-width:760px){
+  .mode-grid{grid-template-columns:1fr;}
+  .jet-grid{grid-template-columns:1fr 1fr;}
+  .gauge{min-width:60px; padding:5px 8px;}
+  .compass-ring{width:120px; height:120px;}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="gl"></canvas>
+
+  <!-- LOADING -->
+  <div id="loading-screen" class="screen">
+    <div class="scanline-title" style="font-size:clamp(28px,5vw,44px)">SKYSTRIKE</div>
+    <div class="jetline">initializing flight systems</div>
+    <div class="loadbar-wrap"><div class="loadbar-fill" id="loadbar-fill"></div></div>
+    <div class="pct" id="loadpct">0%</div>
+  </div>
+
+  <!-- MAIN MENU -->
+  <div id="main-menu" class="screen hidden">
+    <div class="screen-inner panel">
+      <h1 class="scanline-title">SKYSTRIKE</h1>
+      <div class="subtitle">Fighter Jet Simulator — Over the Open Sea</div>
+
+      <div class="mode-grid">
+        <div class="mode-card selected" data-mode="solo">
+          <div class="icon">✈️</div>
+          <h3>Solo Flight</h3>
+          <p>Race the checkpoint circuit alone or against configurable AI bot pilots.</p>
+        </div>
+        <div class="mode-card" data-mode="split">
+          <div class="icon">🎮</div>
+          <h3>Split-Screen Multiplayer</h3>
+          <p>Two pilots, one keyboard. Race side-by-side on a divided screen, with optional AI bots too.</p>
+        </div>
+      </div>
+
+      <div class="menu-actions">
+        <button class="btn primary" id="btn-to-setup">Continue →</button>
+      </div>
+      <div class="credit-line">W/A/S/D · Q/E · Shift/Ctrl · C — full controls shown before takeoff</div>
+    </div>
+  </div>
+
+  <!-- SETUP -->
+  <div id="setup-screen" class="screen hidden">
+    <div class="screen-inner panel">
+      <h1 class="scanline-title" style="font-size:26px; margin-bottom:18px;">MISSION SETUP</h1>
+
+      <div class="setup-section" id="players-config"></div>
+
+      <div class="setup-section">
+        <label class="head">AI Opponents</label>
+        <div class="slider-row">
+          <label>Bot Count</label>
+          <input type="range" id="bot-count" min="0" max="6" value="2" step="1">
+          <div class="val" id="bot-count-val">2</div>
+        </div>
+        <div class="row-flex" style="margin-top:4px;">
+          <label style="font-size:13px; flex:0 0 190px;">Bot Difficulty</label>
+          <div class="seg" id="bot-difficulty">
+            <button data-v="easy">Easy</button>
+            <button data-v="medium" class="on">Medium</button>
+            <button data-v="hard">Hard</button>
+            <button data-v="ace">Ace</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <label class="head">Circuit</label>
+        <div class="slider-row">
+          <label>Checkpoints</label>
+          <input type="range" id="checkpoint-count" min="3" max="20" value="8" step="1">
+          <div class="val" id="checkpoint-count-val">8</div>
+        </div>
+        <div class="slider-row">
+          <label>Circuit Spread</label>
+          <input type="range" id="circuit-spread" min="1" max="3" value="2" step="1">
+          <div class="val" id="circuit-spread-val">2</div>
+        </div>
+      </div>
+
+      <div class="setup-section" id="controls-recap"></div>
+
+      <div class="menu-actions">
+        <button class="btn ghost" id="btn-back-menu">← Back</button>
+        <button class="btn primary" id="btn-launch">Launch Mission ✈</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud-layer" class="hidden"></div>
+  <div id="split-divider" class="hidden"></div>
+
+  <!-- MESSAGE BANNER (global, non-split) -->
+  <div class="message-banner" id="global-banner">
+    <div class="big" id="banner-big"></div>
+    <div class="small" id="banner-small"></div>
+  </div>
+
+  <!-- PAUSE -->
+  <div id="pause-screen" class="screen hidden">
+    <div class="screen-inner panel" style="width:min(420px,90vw);">
+      <h1 class="scanline-title" style="font-size:26px;">PAUSED</h1>
+      <div style="display:flex; flex-direction:column; gap:12px; margin-top:22px;">
+        <button class="btn primary" id="btn-resume">Resume Flight</button>
+        <button class="btn" id="btn-restart">Restart Mission</button>
+        <button class="btn ghost" id="btn-quit">Exit to Main Menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULTS -->
+  <div id="results-screen" class="screen hidden">
+    <div class="screen-inner panel" style="width:min(520px,92vw);">
+      <h1 class="scanline-title" style="font-size:26px;">MISSION DEBRIEF</h1>
+      <div class="result-list" id="result-list"></div>
+      <div class="menu-actions">
+        <button class="btn primary" id="btn-again">Fly Again</button>
+        <button class="btn ghost" id="btn-results-menu">Main Menu</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.161.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.161.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="main.js"></script>
+</body>
+</html>
