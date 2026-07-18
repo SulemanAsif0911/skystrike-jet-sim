@@ -122,7 +122,7 @@ function buildPlayersConfigUI(){
   document.getElementById('controls-recap').innerHTML = `
     <label class="head">Controls</label>
     <div class="controls-hint">
-      <b>Pilot 1:</b> W/S pitch · A/D roll · Q/E yaw · Shift/Ctrl throttle · Space boost · C camera view · Esc pause<br>
+      <b>Pilot 1:</b> W/S pitch · A/D roll · Q/E yaw · Shift/Ctrl throttle · Space boost · C camera view · Esc pause · N nose-flip test<br>
       <b>Pilot 2 (split-screen):</b> Arrows pitch/roll · , / . yaw · [ / ] throttle · / boost · M camera view
     </div>`;
 }
@@ -348,6 +348,11 @@ function animate(){
         controls = p.playerIndex === 1 ? Input.p2Controls() : Input.p1Controls();
         const toggled = p.playerIndex === 1 ? Input.p2CameraToggleJustPressed() : Input.p1CameraToggleJustPressed();
         if (toggled) jet.toggleCamera();
+        if (p.playerIndex !== 1 && Input.p1DebugFlipJustPressed()){
+          const nowFlipped = jet.debugFlipNose();
+          const vp = race.viewports.find(v=>v.jet===jet);
+          if (vp) vp.hud.showBanner('NOSE FLIP TEST', `${jet.def.id}: set flip180:${nowFlipped} in core.js if this looks right`, 4000);
+        }
       } else {
         const target = race.checkpoints[jet.checkpointIndex];
         controls = p.bot.computeControls(target, dt, (x,z,t)=>ocean.heightAt(x,z,t), race.worldTime);
