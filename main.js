@@ -7,6 +7,11 @@ import { JetTemplate, Jet } from './jet.js';
 import { BotPilot } from './bot.js';
 import { buildHud, setViewportRect } from './hud.js';
 import * as Input from './input.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
+import { FXAAShader } from 'three/addons/shaders/FXAAShader.js';
 
 /* ------------------------------ DOM refs ------------------------------ */
 const canvas = document.getElementById('gl');
@@ -25,6 +30,11 @@ const resultList = document.getElementById('result-list');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias:true, powerPreference:'high-performance' });
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+// Filmic tone mapping gives highlights (sun glare, canopy glint, afterburner) a much more
+// photographic rolloff instead of the flat/washed-out look of the default linear mapping.
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+const MAX_ANISOTROPY = renderer.capabilities.getMaxAnisotropy();
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.Fog(0x8fc3cc, 1800, 6200);
@@ -33,14 +43,40 @@ const ocean = new Ocean(scene);
 const sky = buildSky(scene);
 const clouds = buildClouds(scene);
 
+// Bake the sky dome into a PMREM environment map once, so every PBR jet material (metal
+// fuselage, glass canopy) picks up realistic sky/horizon reflections instead of looking flat.
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+{
+  const envScene = new THREE.Scene();
+  envScene.add(sky.mesh.clone());
+  const envRT = pmremGenerator.fromScene(envScene, 0.02, 1, 25000);
+  scene.environment = envRT.texture;
+  pmremGenerator.dispose();
+}
+
 let idleCamAngle = 0;
 const idleCamera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.5, 20000);
+
+/* ------------------------------ post-processing (single-viewport only) ------------------------------ */
+const composer = new EffectComposer(renderer);
+const renderPass = new RenderPass(scene, idleCamera);
+composer.addPass(renderPass);
+const bloomPass = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.55, 0.6, 0.86);
+composer.addPass(bloomPass);
+const fxaaPass = new ShaderPass(FXAAShader);
+fxaaPass.renderToScreen = true;
+composer.addPass(fxaaPass);
 
 function resize(){
   const w = window.innerWidth, h = window.innerHeight;
   renderer.setSize(w, h);
   idleCamera.aspect = w/h;
   idleCamera.updateProjectionMatrix();
+  composer.setSize(w, h);
+  const pr = renderer.getPixelRatio();
+  fxaaPass.material.uniforms['resolution'].value.set(1/(w*pr), 1/(h*pr));
+  bloomPass.setSize(w, h);
 }
 window.addEventListener('resize', resize);
 resize();
@@ -75,7 +111,7 @@ function loadJetTemplates(onProgress){
 
   return Promise.all(JET_DEFS.map(def=>new Promise((resolve,reject)=>{
     loader.load(def.file, gltf=>{
-      jetTemplates[def.id] = new JetTemplate(def, gltf);
+      jetTemplates[def.id] = new JetTemplate(def, gltf, MAX_ANISOTROPY);
       progressPerFile[def.id] = 1; reportProgress();
       resolve();
     }, evt=>{
@@ -122,7 +158,7 @@ function buildPlayersConfigUI(){
   document.getElementById('controls-recap').innerHTML = `
     <label class="head">Controls</label>
     <div class="controls-hint">
-      <b>Pilot 1:</b> W/S pitch · A/D roll · Q/E yaw · Shift/Ctrl throttle · Space boost · C camera view · Esc pause · N nose-flip test<br>
+      <b>Pilot 1:</b> W/S pitch · A/D roll · Q/E yaw · Shift/Ctrl throttle · Space boost · C camera view · Esc pause<br>
       <b>Pilot 2 (split-screen):</b> Arrows pitch/roll · , / . yaw · [ / ] throttle · / boost · M camera view
     </div>`;
 }
@@ -178,7 +214,7 @@ function endToMenu(){
 /* ------------------------------ race construction ------------------------------ */
 function teardownRace(){
   if (!race) return;
-  race.participants.forEach(p=>{ scene.remove(p.jet.object); });
+  race.participants.forEach(p=>{ p.jet.dispose(); });
   race.checkpoints.forEach(cp=>cp.dispose(scene));
   hudLayer.innerHTML = '';
   hudLayer.classList.add('hidden');
@@ -205,10 +241,10 @@ function startRace(){
     participants.push({ jet, isHuman:true, playerIndex:i, bot:null });
   }
 
-  // Equal rotation across all three jets so every model actually shows up in play.
-  // (F35's source mesh is heavier than the other two - if you add many bots and notice
-  // slowdown, you can bias this back toward f16/f14, e.g. ['f16','f14','f16','f35','f14','f16'].)
-  const botJetCycle = ['f16','f35','f14'];
+  // F35's source mesh is far higher-poly than the other two jets and can't be simplified further
+  // without visible damage, so bots favor the lighter F16/F14 models to keep multi-bot and
+  // split-screen framerates healthy; F35 still appears, just less often.
+  const botJetCycle = ['f16','f14','f16','f35','f14','f16'];
   for (let i=0;i<config.botCount;i++){
     const def = JET_DEFS.find(d=>d.id===botJetCycle[i % botJetCycle.length]) || JET_DEFS[0];
     const tmpl = jetTemplates[def.id];
@@ -348,11 +384,6 @@ function animate(){
         controls = p.playerIndex === 1 ? Input.p2Controls() : Input.p1Controls();
         const toggled = p.playerIndex === 1 ? Input.p2CameraToggleJustPressed() : Input.p1CameraToggleJustPressed();
         if (toggled) jet.toggleCamera();
-        if (p.playerIndex !== 1 && Input.p1DebugFlipJustPressed()){
-          const nowFlipped = jet.debugFlipNose();
-          const vp = race.viewports.find(v=>v.jet===jet);
-          if (vp) vp.hud.showBanner('NOSE FLIP TEST', `${jet.def.id}: set flip180:${nowFlipped} in core.js if this looks right`, 4000);
-        }
       } else {
         const target = race.checkpoints[jet.checkpointIndex];
         controls = p.bot.computeControls(target, dt, (x,z,t)=>ocean.heightAt(x,z,t), race.worldTime);
@@ -380,14 +411,16 @@ function animate(){
       jetCam.aspect = renderer.domElement.clientWidth / renderer.domElement.clientHeight;
       jetCam.updateProjectionMatrix();
       renderer.setViewport(0,0,renderer.domElement.clientWidth, renderer.domElement.clientHeight);
-      renderer.render(scene, jetCam);
+      renderPass.camera = jetCam;
+      composer.render();
     }
   } else if (appState === 'paused' && race){
     ocean.update(0, race.viewports[0].jet.camera);
     if (race.viewports.length > 1) renderSplit();
     else {
       const jetCam = race.viewports[0].jet.camera;
-      renderer.render(scene, jetCam);
+      renderPass.camera = jetCam;
+      composer.render();
     }
   } else {
     // idle render (menu backdrop) using a slowly orbiting camera over the ocean
@@ -396,7 +429,8 @@ function animate(){
     idleCamera.lookAt(0,20,0);
     ocean.update(dt, idleCamera);
     renderer.setViewport(0,0,renderer.domElement.clientWidth, renderer.domElement.clientHeight);
-    renderer.render(scene, idleCamera);
+    renderPass.camera = idleCamera;
+    composer.render();
   }
 }
 

@@ -64,6 +64,12 @@ void main(){
   vec3 color = base + uSunColor * (spec*1.6 + spec2);
   color = mix(color, uShallowColor*1.4, fresnel*0.55);
 
+  // Whitecap foam: steep, tall wave faces (where the normal tips far from vertical) get a
+  // soft white highlight, same trick real-time ocean shaders use in lieu of simulating spray.
+  float steepness = 1.0 - clamp(n.y, 0.0, 1.0);
+  float foam = smoothstep(0.55, 0.9, steepness) * smoothstep(0.4, 1.8, vHeight);
+  color = mix(color, vec3(0.92, 0.97, 0.98), foam * 0.55);
+
   float dist = length(uCameraPos - vWorldPos);
   float fog = smoothstep(400.0, 5200.0, dist);
   vec3 fogColor = vec3(0.55,0.68,0.72);

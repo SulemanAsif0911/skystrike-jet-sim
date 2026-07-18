@@ -90,9 +90,13 @@ function analyzeAndNormalize(root){
   };
   const noseLocal = axisVec(fwdAxis, !noseAtMin); // unit vector pointing FROM tail TO nose, in local space
   const upLocalRaw = axisVec(upAxis, true);
-  // orthonormal local triad: right = up x nose, trueUp = nose x right
-  const right = new THREE.Vector3().crossVectors(upLocalRaw, noseLocal).normalize();
-  const trueUp = new THREE.Vector3().crossVectors(noseLocal, right).normalize();
+  // orthonormal local triad, built so {right, trueUp, noseLocal} is RIGHT-HANDED like three.js's
+  // (+X right, +Y up, -Z forward) convention: right = nose x up, trueUp = right x nose.
+  // (The previous order — up x nose / nose x right — produces a mirror-image basis with
+  // determinant -1. THREE.Quaternion.setFromRotationMatrix() assumes a proper rotation matrix
+  // and silently corrupts the result for a reflection, which is what made jets fly nose-backwards.)
+  const right = new THREE.Vector3().crossVectors(noseLocal, upLocalRaw).normalize();
+  const trueUp = new THREE.Vector3().crossVectors(right, noseLocal).normalize();
 
   // We want a rotation T such that T*right=(1,0,0), T*trueUp=(0,1,0), T*noseLocal=(0,0,-1)
   // (three.js forward convention is -Z). Since {right,trueUp,noseLocal} is orthonormal,
@@ -114,8 +118,36 @@ function analyzeAndNormalize(root){
   return { correction, scale, center, rawSize:size };
 }
 
+/* ----------------------- shared FX textures (built once, reused by every jet) ----------------------- */
+let _glowTex = null;
+function glowTexture(){
+  if (_glowTex) return _glowTex;
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,'rgba(255,255,255,1)');
+  g.addColorStop(0.35,'rgba(255,255,255,0.75)');
+  g.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  _glowTex = new THREE.CanvasTexture(c);
+  return _glowTex;
+}
+let _shadowTex = null;
+function shadowTexture(){
+  if (_shadowTex) return _shadowTex;
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64;
+  const ctx = c.getContext('2d');
+  const g = ctx.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,'rgba(0,8,14,0.55)');
+  g.addColorStop(0.55,'rgba(0,8,14,0.25)');
+  g.addColorStop(1,'rgba(0,8,14,0)');
+  ctx.fillStyle = g; ctx.fillRect(0,0,64,64);
+  _shadowTex = new THREE.CanvasTexture(c);
+  return _shadowTex;
+}
+
 export class JetTemplate {
-  constructor(def, gltf){
+  constructor(def, gltf, maxAnisotropy=8){
     this.def = def;
     const root = gltf.scene;
     const info = analyzeAndNormalize(root);
@@ -135,7 +167,7 @@ export class JetTemplate {
         o.castShadow = false; o.receiveShadow = false;
         if (o.material){
           const mats = Array.isArray(o.material) ? o.material : [o.material];
-          mats.forEach(m=>{ if (m.map) m.map.anisotropy = 4; m.side = THREE.FrontSide; });
+          mats.forEach(m=>{ if (m.map) m.map.anisotropy = maxAnisotropy; m.side = THREE.FrontSide; });
         }
       }
     });
@@ -203,6 +235,130 @@ export class Jet {
 
     this.name = opts.name || this.def.name;
     this.color = opts.color || '#28f0ff';
+
+    this._buildFx(template);
+  }
+
+  _buildFx(template){
+    const scene = this.scene;
+
+    // Engine core glow — always-on, brightens with throttle.
+    const glowMat = new THREE.SpriteMaterial({ map:glowTexture(), color:0xffb066, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0 });
+    this._engineGlow = new THREE.Sprite(glowMat);
+    this._engineGlow.scale.setScalar(2.0);
+    this._engineGlow.position.set(0, template.bottomY*0.12 + template.topY*0.06, template.tailZ*0.97);
+    this.object.add(this._engineGlow);
+
+    // Afterburner flame — only flares up while boosting.
+    const flameMat = new THREE.SpriteMaterial({ map:glowTexture(), color:0x5fb4ff, transparent:true, blending:THREE.AdditiveBlending, depthWrite:false, opacity:0 });
+    this._flame = new THREE.Sprite(flameMat);
+    this._flame.scale.set(2.0, 6.5, 1);
+    this._flame.position.set(0, template.bottomY*0.12 + template.topY*0.06, template.tailZ*1.05);
+    this.object.add(this._flame);
+
+    // Wingtip contrails — small pool of world-space puffs recycled as they age out.
+    const wingX = template.halfWidth*0.9;
+    const wingY = template.topY*0.05 + template.bottomY*0.05;
+    const wingZ = template.length*0.02;
+    this._trailAnchor = {
+      L: new THREE.Vector3(-wingX, wingY, wingZ),
+      R: new THREE.Vector3(wingX, wingY, wingZ),
+    };
+    const TRAIL_COUNT = 18;
+    this._trailPool = { L:[], R:[] };
+    ['L','R'].forEach(side=>{
+      for (let i=0;i<TRAIL_COUNT;i++){
+        const m = new THREE.SpriteMaterial({ map:glowTexture(), color:0xffffff, transparent:true, depthWrite:false, opacity:0 });
+        const s = new THREE.Sprite(m);
+        s.visible = false;
+        scene.add(s);
+        this._trailPool[side].push({ sprite:s, life:0, maxLife:1.6 });
+      }
+    });
+    this._trailCursor = { L:0, R:0 };
+    this._trailTimer = 0;
+
+    // Contact shadow on the sea surface — cheap stand-in for a real shadow map over water.
+    const shadowMat = new THREE.MeshBasicMaterial({ map:shadowTexture(), transparent:true, depthWrite:false, side:THREE.DoubleSide });
+    this._shadowMesh = new THREE.Mesh(new THREE.PlaneGeometry(1,1), shadowMat);
+    this._shadowMesh.rotation.x = -Math.PI/2;
+    this._shadowSize = Math.max(template.length, template.halfWidth*2) * 1.3;
+    scene.add(this._shadowMesh);
+  }
+
+  _updateFx(dt, waterHeightFn, worldTime){
+    const speedFrac = clamp((this.speed - this.minSpeed) / (this.maxSpeed - this.minSpeed), 0, 1);
+
+    // Engine glow scales with throttle/speed, with a little flicker.
+    const flicker = 0.9 + Math.sin(worldTime*23 + this.position.x*0.01)*0.1;
+    const glowTarget = (0.18 + speedFrac*0.55) * flicker;
+    this._engineGlow.material.opacity = lerp(this._engineGlow.material.opacity, glowTarget, clamp(dt*6,0,1));
+    const glowScale = 1.5 + speedFrac*1.3;
+    this._engineGlow.scale.setScalar(glowScale);
+
+    // Afterburner flame flares when boosting, otherwise fades out.
+    const flameTarget = this.boosting ? 0.85*flicker : 0;
+    this._flame.material.opacity = lerp(this._flame.material.opacity, flameTarget, clamp(dt*10,0,1));
+    const flameLen = 5.5 + Math.sin(worldTime*31)*1.2;
+    this._flame.scale.set(1.8 + (this.boosting?0.6:0), this.boosting ? flameLen : 3, 1);
+
+    // Wingtip contrails: spawn while boosting or flying fast, always advect/fade what's already out.
+    this._trailTimer -= dt;
+    const shouldEmit = (this.boosting || speedFrac > 0.82) && this.crashedTimer <= 0;
+    if (shouldEmit && this._trailTimer <= 0){
+      this._trailTimer = 0.045;
+      ['L','R'].forEach(side=>{
+        const worldPos = this._trailAnchor[side].clone().applyQuaternion(this.quaternion).add(this.position);
+        const pool = this._trailPool[side];
+        const idx = this._trailCursor[side];
+        this._trailCursor[side] = (idx+1) % pool.length;
+        const entry = pool[idx];
+        entry.life = 0;
+        entry.sprite.position.copy(worldPos);
+        entry.sprite.scale.setScalar(1.4);
+        entry.sprite.visible = true;
+        entry.sprite.material.opacity = 0.42;
+      });
+    }
+    ['L','R'].forEach(side=>{
+      this._trailPool[side].forEach(entry=>{
+        if (!entry.sprite.visible) return;
+        entry.life += dt;
+        if (entry.life >= entry.maxLife){
+          entry.sprite.visible = false;
+          entry.sprite.material.opacity = 0;
+          return;
+        }
+        const t = entry.life / entry.maxLife;
+        entry.sprite.material.opacity = 0.42 * (1-t);
+        entry.sprite.scale.setScalar(1.4 + t*3.2);
+      });
+    });
+
+    // Sea-surface contact shadow, fading and shrinking with altitude.
+    const waterY = SEA_LEVEL + (waterHeightFn ? waterHeightFn(this.position.x, this.position.z, worldTime) : 0);
+    const altAbove = this.position.y - waterY;
+    if (altAbove > 700 || this.finished){
+      this._shadowMesh.visible = false;
+    } else {
+      this._shadowMesh.visible = true;
+      this._shadowMesh.position.set(this.position.x, waterY+0.6, this.position.z);
+      const shrink = clamp(1 - altAbove/700, 0.18, 1);
+      this._shadowMesh.scale.setScalar(this._shadowSize * shrink);
+      this._shadowMesh.material.opacity = clamp(0.85 * shrink, 0.05, 0.85);
+    }
+  }
+
+  dispose(){
+    this.scene.remove(this.object);
+    this.scene.remove(this._shadowMesh);
+    this._shadowMesh.geometry.dispose(); this._shadowMesh.material.dispose();
+    ['L','R'].forEach(side=>{
+      this._trailPool[side].forEach(entry=>{
+        this.scene.remove(entry.sprite);
+        entry.sprite.material.dispose();
+      });
+    });
   }
 
   spawn(position, headingRad){
@@ -229,7 +385,7 @@ export class Jet {
   }
 
   update(dt, waterHeightFn, worldTime){
-    if (this.finished){ this._updateCameraOnly(dt); return; }
+    if (this.finished){ this._updateCameraOnly(dt); this._updateFx(dt, waterHeightFn, worldTime); return; }
     this.raceClock += dt;
 
     if (this.crashedTimer > 0){
@@ -238,6 +394,7 @@ export class Jet {
       this._integrate(dt, waterHeightFn, worldTime);
       this._syncObject();
       this._updateCamera(dt);
+      this._updateFx(dt, waterHeightFn, worldTime);
       return;
     }
 
@@ -274,6 +431,7 @@ export class Jet {
     this._integrate(dt, waterHeightFn, worldTime);
     this._syncObject();
     this._updateCamera(dt);
+    this._updateFx(dt, waterHeightFn, worldTime);
   }
 
   _integrate(dt, waterHeightFn, worldTime){
@@ -333,15 +491,6 @@ export class Jet {
     this.camera.updateProjectionMatrix();
   }
   toggleCamera(){ this.cameraMode = this.cameraMode==='third' ? 'first' : 'third'; this._camInit=false; }
-
-  // Debug helper: flips only the visual mesh 180° around its own vertical axis, without touching
-  // flight physics/orientation — lets you confirm the correct flip180 value live before editing core.js.
-  debugFlipNose(){
-    const inner = this.object.children[0];
-    inner.rotateY(Math.PI);
-    this._noseFlipped = !this._noseFlipped;
-    return this._noseFlipped;
-  }
 
   distanceTo(pointVec3){ return this.position.distanceTo(pointVec3); }
 }

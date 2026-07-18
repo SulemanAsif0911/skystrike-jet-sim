@@ -1,5 +1,32 @@
 # SKYSTRIKE — Fighter Jet Simulator
 
+## Changelog (this pass)
+
+**Fixed: jets flying nose-backwards.** The auto-orientation code in `jet.js` built its
+right/up/forward basis with a cross-product in the wrong order (`up × nose` instead of
+`nose × up`). That produces a mirror-image (reflection) matrix rather than a real rotation —
+and `THREE.Quaternion.setFromRotationMatrix()` can't represent a reflection, so it silently
+produced a corrupted orientation. That's what made the nose appear to point at the camera. Fixed
+by swapping the cross-product order (see the comment in `analyzeAndNormalize()` in `jet.js`). If
+any *specific* model still looks off after this fix, the one-line `flip180: true` override per
+jet in `JET_DEFS` (core.js) is still there as a safety net — but it shouldn't be needed now.
+
+**More realistic graphics:**
+- ACES filmic tone mapping + tuned exposure for photographic-looking highlights instead of the
+  flat/washed-out default.
+- A PMREM environment map baked from the sky dome, so the jets' PBR metal/glass materials now
+  pick up real sky/horizon reflections instead of looking matte and flat.
+- A bloom + FXAA post-processing pass (single-viewport mode) for glow on the sun, canopy glint,
+  and afterburner flame, plus smoother edges.
+- Engine core glow (brightens with throttle) and an afterburner flame that flares up while
+  boosting.
+- Wingtip contrails that stream off at high speed / while boosting.
+- A soft contact shadow under the jet on the sea surface, shrinking/fading with altitude.
+- Whitecap foam highlighting on steep wave faces in the ocean shader.
+- Higher anisotropic texture filtering (uses the renderer's actual max) for crisper panel lines
+  at oblique angles.
+
+
 A browser-based 3D fighter jet racer built with Three.js, using your F-16C, F-35, and F-14
 Sketchfab models flying low over a shader-animated open sea, racing through glowing checkpoint
 rings against configurable AI bots — solo or local split-screen multiplayer.

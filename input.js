@@ -22,7 +22,6 @@ export function p1Controls(){
 }
 export function p1CameraToggleJustPressed(){ return consumeEdge('KeyC'); }
 export function p1PauseJustPressed(){ return consumeEdge('Escape'); }
-export function p1DebugFlipJustPressed(){ return consumeEdge('KeyN'); }
 
 // Player 2 (split-screen): Arrow keys pitch/roll, ,/. yaw, ]/[ throttle, / boost, M camera
 export function p2Controls(){
