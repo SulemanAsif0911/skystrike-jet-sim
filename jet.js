@@ -465,29 +465,33 @@ export class Jet {
 
   _updateCamera(dt){
     const t = this.template;
-    let desiredPos, desiredLook, fov = 62;
+    let desiredPos, desiredLook, fov;
     if (this.cameraMode === 'first'){
-      const localOffset = new THREE.Vector3(0, t.topY*0.42, t.noseZ*0.32);
+      // Cockpit eye point — canopy height, sitting back from the nose tip rather than at it
+      // (a real cockpit is set back behind the radome/intakes, not out at the very point).
+      const cockpitZ = lerp(t.tailZ, t.noseZ, 0.58);
+      const localOffset = new THREE.Vector3(0, t.topY*0.55, cockpitZ);
       desiredPos = localOffset.clone().applyQuaternion(this.quaternion).add(this.position);
       desiredLook = desiredPos.clone().add(this.forward.clone().multiplyScalar(200));
-      fov = 72;
+      fov = 75;
     } else {
       const behind = Math.max(28, t.length*1.9);
       const localOffset = new THREE.Vector3(0, t.topY + 7, behind);
       desiredPos = localOffset.clone().applyQuaternion(this.quaternion).add(this.position);
       desiredLook = this.position.clone().add(this.forward.clone().multiplyScalar(t.length*1.2)).add(new THREE.Vector3(0,t.topY*0.3,0));
-      fov = 58 + clamp((this.speed/this.maxSpeed)*8, 0, 10);
+      fov = 62;
     }
-    if (!this._camInit){ this.camPos.copy(desiredPos); this.camLookAt.copy(desiredLook); this._camInit = true; }
-    const posLerp = this.cameraMode==='first' ? 1 : clamp(dt*6,0,1);
-    const lookLerp = this.cameraMode==='first' ? 1 : clamp(dt*8,0,1);
-    this.camPos.lerp(desiredPos, posLerp);
-    this.camLookAt.lerp(desiredLook, lookLerp);
+    // Fixed camera: rigidly locked to the jet's current transform every frame — no
+    // positional/rotational lag and no speed-based FOV zoom, so it reads as bolted-on rather
+    // than a floaty chase-cam.
+    this.camPos.copy(desiredPos);
+    this.camLookAt.copy(desiredLook);
+    this._camInit = true;
 
     this.camera.position.copy(this.camPos);
     this.camera.up.set(0,1,0);
     this.camera.lookAt(this.camLookAt);
-    this.camera.fov = lerp(this.camera.fov, fov, clamp(dt*3,0,1));
+    this.camera.fov = fov;
     this.camera.updateProjectionMatrix();
   }
   toggleCamera(){ this.cameraMode = this.cameraMode==='third' ? 'first' : 'third'; this._camInit=false; }

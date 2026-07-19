@@ -396,6 +396,13 @@ function animate(){
     race.checkpoints.forEach(cp=>cp.update(dt));
     ocean.update(dt, race.viewports[0].jet.camera);
 
+    const audioSource = race.participants.find(p=>p.isHuman && (p.playerIndex??0)===0) || race.participants.find(p=>p.isHuman);
+    if (audioSource){
+      const aj = audioSource.jet;
+      const speedFrac = clamp((aj.speed - aj.minSpeed) / (aj.maxSpeed - aj.minSpeed), 0, 1);
+      audio.update(speedFrac, aj.boosting);
+    }
+
     race.viewports.forEach(vp=>vp.hud.update(vp.jet, race.checkpoints, race.checkpoints.length));
 
     if (race.ended && performance.now() - raceEndedAt > 2200){

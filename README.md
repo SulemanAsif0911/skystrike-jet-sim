@@ -26,6 +26,17 @@ jet in `JET_DEFS` (core.js) is still there as a safety net — but it shouldn't 
 - Higher anisotropic texture filtering (uses the renderer's actual max) for crisper panel lines
   at oblique angles.
 
+**Real audio support.** `core.js` now tries to load actual recorded sound files for the engine
+loop, wind, and splash from `assets/audio/` (fetch + decodeAudioData), crossfading them in over
+the old synthesized versions the moment each one finishes loading — and falling back cleanly to
+synthesis if a file is missing. See `assets/audio/README.md` for exactly which files to drop in
+(with sourced CC0 download links) — I couldn't fetch the actual audio bytes myself from this
+sandbox (no outbound network access here), so that last step needs you. Also fixed: `audio.update()`
+— the function that drives engine/wind volume and pitch — was defined but never actually called
+anywhere in the game loop, so that ambient sound had been silent regardless of backend; it's now
+called every frame from `main.js`.
+
+
 
 A browser-based 3D fighter jet racer built with Three.js, using your F-16C, F-35, and F-14
 Sketchfab models flying low over a shader-animated open sea, racing through glowing checkpoint
